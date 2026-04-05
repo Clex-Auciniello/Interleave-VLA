@@ -108,7 +108,9 @@ class FinetuneConfig:
 
 @draccus.wrap()
 def finetune(cfg: FinetuneConfig) -> None:
-    accelerator = accelerate.Accelerator(split_batches=True)
+    accelerator = accelerate.Accelerator(
+        dataloader_config=accelerate.DataLoaderConfiguration(split_batches=True, dispatch_batches=False),
+    )
     # accelerator = accelerate.Accelerator()
     device = accelerator.device
 

@@ -41,7 +41,6 @@ from transformers.optimization import get_constant_schedule, get_cosine_schedule
 
 import wandb
 import sys
-sys.path.append('/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/sunyihang/Chameleon-VLA/openvla')
 from internvl.extern.hf.conversation import Conversation as InternvlPromptBuilder, get_conv_template
 from internvl.extern.hf.processing_internvl import InternvlProcessor
 from internvl.extern.hf.configuration_internvl import OpenVLAConfig
@@ -100,7 +99,7 @@ class FinetuneConfig:
     # Tracking Parameters
     exp_name: str = None
     wandb_project: str = "openvla"                                  # Name of W&B project to log to (use default!)
-    wandb_entity: str = "alfayoung2004-shanghai-jiao-tong-university" # Name of entity to log under
+    wandb_entity: Optional[str] = None                                # Name of entity to log under
     run_id_note: Optional[str] = None                               # Extra note for logging, Weights & Biases
 
     # @formatter :on
@@ -109,16 +108,9 @@ class FinetuneConfig:
 # @draccus.wrap()
 def finetune() -> None:
     cfg = FinetuneConfig()
-    cfg.data_root_dir = '/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/sunyihang/Chameleon-VLA/dataset'
-    cfg.dataset_name = 'se2_task1'
     cfg.batch_size = 8
     cfg.image_aug = True
     device = 'cuda:0'
-    cfg.vla_path = '/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/sunyihang/Chameleon-VLA/pretrained'
-    run_dir = '/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/sunyihang/Chameleon-VLA/openvla/vla-scripts/run'
-    
-    print('###################')
-    print(cfg.wandb_entity, cfg.wandb_project)
 
     accelerator = accelerate.Accelerator(split_batches=True)
     # accelerator = accelerate.Accelerator()

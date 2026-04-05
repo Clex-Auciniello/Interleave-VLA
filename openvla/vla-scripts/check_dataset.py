@@ -30,12 +30,9 @@ dataset = dataset.map(func)
 
 # ============================= Params ===============================
 # OXE
-data_root = "/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/tensorflow_datasets"
+data_root = "datasets/open-x-embodiment"                               # Path to RLDS dataset directory
 dataset_name = "bridge_dataset"
-# vima
-# data_root = "/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/tensorflow_datasets"
-# dataset_name = "vima_dataset"
-vla_path = "/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/internvl_checkpoint/2b"
+vla_path = "checkpoints/internvl-2b"                                   # Path to VLA checkpoint
 save_path = "batch_data.pkl"
 # ====================================================================
 

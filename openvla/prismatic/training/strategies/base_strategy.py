@@ -282,15 +282,6 @@ class TrainingStrategy(ABC):
             #   => This means looping over the DataLoader is basically "infinite" (so no outer loop over epochs).
             #      Slightly breaks default PyTorch semantics, which is why we adaptively compute `epoch` below.
             for batch in dataloader:
-                
-                import pickle
-                # print(batch)
-                # with open("/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/Chameleon-VLA/openvla/vla-scripts/batch_data.pkl", "wb") as f:
-                #     pickle.dump(batch, f)
-                # exit(0)
-                with open("/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/Chameleon-VLA/openvla/vla-scripts/batch_data.pkl", "rb") as f:
-                    batch = pickle.load(f)
-                
                 # Note that we'll unpack batch (and let AMP/FSDP do its thing) in the VLM.forward() call
                 #   => Basically, if we're using mixed precision (or not), autocast()/FSDP will move to device!
                 with torch.autocast(
@@ -337,20 +328,6 @@ class TrainingStrategy(ABC):
                 )
                 action_l1_loss = torch.nn.functional.l1_loss(continuous_actions_pred, continuous_actions_gt)
 
-                print(f"L1 loss = {action_l1_loss}")
-                input_embeds = self.vlm._fsdp_wrapped_module.llm_backbone.llm.model.embed_tokens.weight.view((-1, 4096))
-                output_embeds = self.vlm._fsdp_wrapped_module.llm_backbone.llm.lm_head.weight.view((-1, 4096))
-                try:
-                    print(f"Whether the same : {torch.all(output_embeds - output_embeds[0] < 1e-5, dim=1)}")
-                    with open("/inspire/ssd/ws-f4d69b29-e0a5-44e6-bd92-acf4de9990f0/public-project/public/yjc/cunxin/Chameleon-VLA/openvla/vla-scripts/output_embeds.pkl", "wb") as f:
-                        pickle.dump(output_embeds, f)
-                    exit(0)
-                except:
-                    pass
-                print(f"input train: {input_embeds.shape}, output train: {output_embeds.shape}")
-                print(f"LLM Input Embeds = {input_embeds[-256:, :]}")
-                print(f"LLM Output Embeds = {output_embeds[-256:, :]}")
-                
                 # Commit Metrics
                 metrics.commit(action_accuracy=action_accuracy, l1_loss=action_l1_loss, update_step_time=True)
 

@@ -127,6 +127,8 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "vima_task7_dataset:0.1.0": vima_dataset_transform,
     "vima_se2_dataset": vima_se2_dataset_transform,
     "vima_se2_dataset:0.1.0": vima_se2_dataset_transform,
+    "vima_interleave": vima_se2_dataset_transform,
+    "vima_interleave:0.1.0": vima_se2_dataset_transform,
     ### LIBERO datasets (modified versions)
     "libero_spatial_no_noops": libero_dataset_transform,
     "libero_object_no_noops": libero_dataset_transform,

@@ -62,6 +62,12 @@ INTERLEAVED_MIXTURES: Dict[str, List[Tuple[str, float]]] = {
     "vima_task2_dataset:0.1.0": [
         ("vima_task2_dataset:0.1.0", 1.0),
     ],
+    "vima_interleave": [
+        ("vima_interleave", 1.0),
+    ],
+    "vima_interleave:0.1.0": [
+        ("vima_interleave:0.1.0", 1.0),
+    ],
     "se2_dataset": [
         ("se2_dataset", 1.0),
     ],
