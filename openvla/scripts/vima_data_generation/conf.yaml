@@ -1,0 +1,18 @@
+task_selection: ["scene_understanding"]
+modalities: ["rgb", "segm"]
+num_episodes_per_task: 10
+success_only: true
+save_path: "vima_dataset_se2"
+parallel: false
+seed: 0
+num_save_digits: 6
+
+hydra:
+  job:
+    chdir: true
+  run:
+    dir: .
+  output_subdir: null
+
+defaults:
+  - _self_

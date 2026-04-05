@@ -11,8 +11,6 @@ from typing import Dict, Tuple, Union
 import dlimp as dl
 import tensorflow as tf
 from absl import logging
-from pandas.tests.arrays.boolean.test_comparison import dtype
-
 
 # ruff: noqa: B023
 def augment(obs: Dict, seed: tf.Tensor, augment_kwargs: Union[Dict, Dict[str, Dict]]) -> Dict:

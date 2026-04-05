@@ -213,7 +213,7 @@ class VLAMetrics:
         run_dir: Path,
         hparams: Dict[str, Any],
         wandb_project: str = "openvla",
-        wandb_entity: Optional[str] = "stanford-voltron",
+        wandb_entity: Optional[str] = None,
         grad_accumulation_steps: int = 1,
         window_size: int = 1,
         resume_step: Optional[int] = None,

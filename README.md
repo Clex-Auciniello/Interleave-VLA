@@ -21,19 +21,15 @@ Train and evaluate:
  🤗 Checkpoint on HuggingFace: [Interleave‑π0 Checkpoint](https://huggingface.co/Interleave-VLA/interleave-pi0-bridge).
 
 ### Interleave‑OpenVLA
-Guide coming soon:
 
- 🛠️ Documentation: [Interleave‑OpenVLA](/openvla/doc/interleave_openvla.md) — in progress ⏳.
-
- 📥 Checkpoint — coming soon ⏳.
+ ✅ Documentation: [Interleave‑OpenVLA](/openvla/doc/interleave_openvla.md) — complete and ready to use.
 
 ## Roadmap 🗺️
 - [x] Release Interleave‑π0 code
 - [x] Release Interleave‑π0 documentation
 - [x] Release Interleave‑π0 checkpoint
 - [x] Release Interleave‑OpenVLA code
-- [ ] Release Interleave‑OpenVLA documentation
-- [ ] Release Interleave‑OpenVLA checkpoint
+- [x] Release Interleave‑OpenVLA documentation
 
 ## Acknowledgements 🙏
 This project builds upon the following works ❤️:
@@ -48,14 +44,11 @@ This project builds upon the following works ❤️:
 ## Citation 📚
 If you find our work helpful, please consider citing our paper:
 ```
-@misc{fan2025interleavevlaenhancingrobotmanipulation,
-      title={Interleave-VLA: Enhancing Robot Manipulation with Interleaved Image-Text Instructions},
-      author={Cunxin Fan and Xiaosong Jia and Yihang Sun and Yixiao Wang and Jianglan Wei and Ziyang Gong and Xiangyu Zhao and Masayoshi Tomizuka and Xue Yang and Junchi Yan and Mingyu Ding},
-      year={2025},
-      eprint={2505.02152},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2505.02152},
+@inproceedings{faninterleave,
+  title={Interleave-VLA: Enhancing Robot Manipulation with Image-Text Interleaved Instructions},
+  author={Fan, Cunxin and Jia, Xiaosong and Sun, Yihang and Wang, Yixiao and Wei, Jianglan and Gong, Ziyang and Zhao, Xiangyu and Tomizuka, Masayoshi and Yang, Xue and Yan, Junchi and others},
+  booktitle={The Fourteenth International Conference on Learning Representations},
+  year={2025}
 }
 ```
 

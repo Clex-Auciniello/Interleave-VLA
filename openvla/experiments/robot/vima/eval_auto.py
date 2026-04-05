@@ -30,9 +30,13 @@ from vima_utils import (
     clip_action, qmul
 )
 
+# Model configurations
+DEFAULT_MODEL_PATH = "path/to/model/chkpt"
+DEFAULT_TASK_IDS = [2]
+
 # Configuration constants
 DEFAULT_CSV_PATH = 'results/evaluation_results.csv'
-DEFAULT_DATASET_NAME = "se2_task2"
+DEFAULT_DATASET_NAME = "vima_interleave" # norm_stats key in dataset_statistics.json
 DEFAULT_MAX_STEPS = 3
 DEFAULT_NUM_EVAL = 100
 DEFAULT_ENV_SEED = 42
@@ -59,12 +63,6 @@ PARTITION_LIST = [
     "novel_object_generalization", 
     "novel_task_generalization"
 ]
-
-# Model configurations
-DEFAULT_CKPT_LIST = list(range(6000, 12001, 400))
-DEFAULT_MODEL_LIST = ['0327-mix1247-se2']
-DEFAULT_TASK_IDS = [1, 4, 7]
-
 
 def setup_logging():
     """Setup logging configuration."""
@@ -181,7 +179,7 @@ def save_results_to_csv(csv_path: str, row_data: Dict):
         writer.writerow(row_data)
 
 
-def eval_one_model(ckpt: int, model: str, task: str, partition: str, 
+def eval_one_model(task: str, partition: str, 
                   dataset_name: str, csv_path: str):
     """
     Evaluate a single model checkpoint.
@@ -194,18 +192,17 @@ def eval_one_model(ckpt: int, model: str, task: str, partition: str,
         dataset_name: Dataset name for normalization
         csv_path: Path to save CSV results
     """
-    model_name_or_path = f"path/to/model/runs/{model}/{ckpt}_chkpt"
-    
+    model_name = DEFAULT_MODEL_PATH.split('/')[-1]
     # Setup video recording if enabled
     video_writer = None
     if DEFAULT_RECORD:
-        video_path = f"videos/{model}_{ckpt}_{task}_{partition}.mp4"
+        video_path = f"videos/{model_name}_{task}_{partition}.mp4"
         os.makedirs(os.path.dirname(video_path), exist_ok=True)
         video_writer = create_video_writer(video_path, DEFAULT_TARGET_SIZE)
 
     try:
         # Load model
-        vla, processor = get_vla_and_processor(model_name_or_path)
+        vla, processor = get_vla_and_processor(DEFAULT_MODEL_PATH)
 
         # Create environment
         env = create_env(task, partition, seed=DEFAULT_ENV_SEED)
@@ -213,7 +210,7 @@ def eval_one_model(ckpt: int, model: str, task: str, partition: str,
 
         # Run evaluation
         with SmartDisplay(visible=False, size=(1024, 768)) as disp:
-            for _ in tqdm(range(DEFAULT_NUM_EVAL), desc=f"Evaluating {model}_{ckpt}"):
+            for _ in tqdm(range(DEFAULT_NUM_EVAL), desc=f"Evaluating {model_name}"):
                 obs = env.reset()
                 
                 meta_info = env.meta_info
@@ -233,7 +230,7 @@ def eval_one_model(ckpt: int, model: str, task: str, partition: str,
                     if DEFAULT_RECORD and video_writer:
                         frame = cv2.cvtColor(np.array(obs_img), cv2.COLOR_RGB2BGR)
                         video_writer.write(frame)
-                        obs_img.save(f"frames/{model}_{ckpt}_obs.jpg")
+                        obs_img.save(f"frames/{model_name}_obs.jpg")
                     
                     # Get action from model
                     action = get_vla_action(
@@ -263,8 +260,8 @@ def eval_one_model(ckpt: int, model: str, task: str, partition: str,
         logging.info(f"Success Rate: {success_rate}, success: {success}, total: {DEFAULT_NUM_EVAL}")
         
         # Save results to CSV
-        model_dir = model_name_or_path.split('/')[-2]
-        model_name = model_name_or_path.split('/')[-1]
+        model_dir = DEFAULT_MODEL_PATH.split('/')[-2]
+        model_name = DEFAULT_MODEL_PATH.split('/')[-1]
 
         row_data = {
             "model_dir": model_dir,
@@ -279,7 +276,7 @@ def eval_one_model(ckpt: int, model: str, task: str, partition: str,
         save_results_to_csv(csv_path, row_data)
         
     except Exception as e:
-        logging.error(f"Error evaluating {model}_{ckpt}: {e}")
+        logging.error(f"Error evaluating {model_name}: {e}")
     finally:
         # Clean up video resources
         if video_writer:
@@ -294,22 +291,9 @@ def main():
     os.makedirs(os.path.dirname(DEFAULT_CSV_PATH), exist_ok=True)
     
     # Run evaluation for all models and tasks
-    for model in DEFAULT_MODEL_LIST:
-        for task_id in DEFAULT_TASK_IDS:
-            dataset_name = f'se2_task{task_id}'
-            
-            for ckpt in DEFAULT_CKPT_LIST:
-                try:
-                    for partition in PARTITION_LIST:
-                        eval_one_model(
-                            ckpt, model, TASK_LIST[task_id], partition, 
-                            dataset_name, DEFAULT_CSV_PATH
-                        )
-                except Exception as e:
-                    logging.error(f"Failed to evaluate {model}_{ckpt}: {e}")
-                    continue
-
+    for task_id in DEFAULT_TASK_IDS:
+        for partition in PARTITION_LIST:
+            eval_one_model(TASK_LIST[task_id], partition, DEFAULT_DATASET_NAME, DEFAULT_CSV_PATH)
 
 if __name__ == '__main__':
     main()
-                        

@@ -10,7 +10,7 @@ accelerate launch \
 --main_process_port 29500 \
 --config_file accelerate/config.yaml \
 finetune_internvl.py \
---vla_path internvl_checkpoint/2b \
+--vla_path /path/to/internvl_checkpoint/2b \
 --data_root_dir ~/tensorflow_datasets \
 --dataset_name vima_interleave \
 --run_root_dir runs \

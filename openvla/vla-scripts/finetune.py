@@ -104,7 +104,7 @@ class FinetuneConfig:
 
     # Tracking Parameters
     wandb_project: str = "openvla"                                  # Name of W&B project to log to (use default!)
-    wandb_entity: str = "alfayoung2004-shanghai-jiao-tong-university" # Name of entity to log under
+    wandb_entity: Optional[str] = None                                # Name of entity to log under
     run_id_note: Optional[str] = None                               # Extra note for logging, Weights & Biases
 
     # fmt: on

@@ -14,7 +14,7 @@ tfds.core.utils.gcs_utils._is_gcs_disabled = True # Add this line to prevent `tf
 
 IMAGE_PLACEHOLDER = "<image>"
 
-RAW_DATA_PATH = "/path/to/collected/vima/dataset/*/"
+RAW_DATA_PATH = "/opt/dlami/nvme/cunxin/Interleave-VLA/openvla/scripts/vima_data_generation/vima_dataset_se2_full/*/"
 
 def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
     """Yields episodes for list of data paths."""
@@ -93,8 +93,8 @@ class VIMADataset(MultiThreadedDatasetBuilder):
     RELEASE_NOTES = {
       '0.1.0': 'partial vima dataset.',
     }
-    N_WORKERS = 2            # number of parallel workers for data conversion
-    MAX_PATHS_IN_MEMORY = 80   # number of paths converted & stored in memory before writing to disk
+    N_WORKERS = 16            # number of parallel workers for data conversion
+    MAX_PATHS_IN_MEMORY = 500  # number of paths converted & stored in memory before writing to disk
                                # -> the higher the faster / more parallel conversion, adjust based on avilable RAM
                                # note that one path may yield multiple episodes and adjust accordingly
     PARSE_FCN = _generate_examples      # handle to parse function from file paths to RLDS episodes
