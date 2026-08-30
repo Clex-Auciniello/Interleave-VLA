@@ -469,7 +469,7 @@ class Ur5eInterleave(MultiThreadedDatasetBuilder):
       '0.1.0': 'Initial UR5e interleaved dataset builder.',
     }
     N_WORKERS = 4             # number of parallel workers for data conversion
-    MAX_PATHS_IN_MEMORY = 16  # number of paths converted & stored in memory before writing to disk
+    MAX_PATHS_IN_MEMORY = 4  # number of paths converted & stored in memory before writing to disk
                                # -> the higher the faster / more parallel conversion, adjust based on avilable RAM
                                # note that one path may yield multiple episodes and adjust accordingly
     PARSE_FCN = _generate_examples      # handle to parse function from file paths to RLDS episodes

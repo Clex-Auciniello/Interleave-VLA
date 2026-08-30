@@ -198,6 +198,7 @@ class ParallelSplitBuilder(split_builder_lib.SplitBuilder):
                 writer._shuffler.add(key, serialized_example)
                 writer._num_examples += 1
         pool.close()
+        pool.join()
 
         print("Finishing split conversion...")
         shard_lengths, total_size = writer.finalize()
