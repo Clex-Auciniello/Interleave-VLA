@@ -547,7 +547,7 @@ class Ur5eInterleave(MultiThreadedDatasetBuilder):
                                 encoding_format='jpeg',
                                 doc='Interleaved instruction images.'
                             ),
-                            length=sample_image_num,
+                            #length=sample_image_num,
                             doc="Image sequence."
                         ),
                         'image_mask': tfds.features.Sequence(
@@ -555,7 +555,7 @@ class Ur5eInterleave(MultiThreadedDatasetBuilder):
                                 dtype=np.bool_,
                                 doc='Mask indicating whether the image is real (True) or padded (False)'
                             ),
-                            length=sample_image_num,
+                            #length=sample_image_num,
                             doc="Image mask sequence."
                         )
                     })
