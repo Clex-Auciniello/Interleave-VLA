@@ -98,20 +98,20 @@ def _get_raw_data_path() -> str:
     return os.path.abspath(os.path.expanduser(raw_data_path))
 
 
-def _repair_first_action_raw(first_step, second_step):
+def _repair_pose_action_raw(current_step, next_step):
     """
-    Recompute the first pose action from state[0] -> state[1].
+    Recompute the pose action connecting current_step -> next_step.
 
     The returned action remains in the RAW dataset representation,
     i.e. pose deltas divided by ACTION_SCALE_FACTOR.
-    The gripper action is left unchanged.
+    The gripper action of current_step is left unchanged.
     """
     state_0 = _to_float32_array(
-        first_step["observation"]["EEF_state"]
+        current_step["observation"]["EEF_state"]
     ).astype(np.float64)
 
     state_1 = _to_float32_array(
-        second_step["observation"]["EEF_state"]
+        next_step["observation"]["EEF_state"]
     ).astype(np.float64)
 
     if state_0.shape != (6,) or state_1.shape != (6,):
@@ -121,13 +121,13 @@ def _repair_first_action_raw(first_step, second_step):
         )
 
     repaired_action = _to_float32_array(
-        first_step["action"]
+        current_step["action"]
     ).copy()
 
     # Translation: p1 = p0 + delta_p
     delta_position = state_1[:3] - state_0[:3]
 
-    # Rotation convention of the dataset:
+    # Rotation convention:
     # R1 = R_delta @ R0
     rotation_0 = Rotation.from_euler(
         "xyz", state_0[3:6]
@@ -143,7 +143,7 @@ def _repair_first_action_raw(first_step, second_step):
         delta_rotation
     ).as_euler("xyz")
 
-    # Restore the raw representation used in the source TFRecord.
+    # Restore RAW source representation.
     repaired_action[:3] = (
         delta_position / ACTION_SCALE_FACTOR
     ).astype(np.float32)
@@ -152,7 +152,7 @@ def _repair_first_action_raw(first_step, second_step):
         delta_rpy / ACTION_SCALE_FACTOR
     ).astype(np.float32)
 
-    # repaired_action[6] is intentionally unchanged.
+    # repaired_action[6] intentionally remains unchanged.
 
     return repaired_action
 
@@ -237,7 +237,7 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
             print("\nLa traiettoria non contiene la chiave 'steps'.")
             return
 
-        steps = trajectory["steps"]
+        steps = list(trajectory["steps"])
 
         original_instruction = _to_string(
             trajectory["language_instruction"]
@@ -271,19 +271,30 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
                 f"instruction, got: {language_instruction!r}"
             )
 
-        first_two_steps = list(steps.take(2))
-
-        if len(first_two_steps) < 2:
+        if len(steps) < 2:
             raise ValueError(
                 f"Episode {global_episode_index} contains fewer than two steps."
             )
 
-        first_step = first_two_steps[0]
-        second_step = first_two_steps[1]
+        first_step = steps[0]
+        second_step = steps[1]
 
-        repaired_first_action_raw = _repair_first_action_raw(
+        penultimate_step = steps[-2]
+        last_step = steps[-1]
+
+        # Repair the first transition.
+        repaired_first_action_raw = _repair_pose_action_raw(
             first_step,
             second_step,
+        )
+
+        # Repair the last transition:
+        # state[-2] -> state[-1].
+        # Only pose components are recomputed;
+        # the original gripper command is preserved.
+        repaired_penultimate_action_raw = _repair_pose_action_raw(
+            penultimate_step,
+            last_step,
         )
 
         initial_front_image = _to_uint8_image(
@@ -319,7 +330,13 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
             )
 
             if i == 0:
+                # Fix first transition: state[0] -> state[1].
                 action_raw = repaired_first_action_raw.copy()
+
+            elif i == len(steps) - 2:
+                # Fix final transition: state[-2] -> state[-1].
+                action_raw = repaired_penultimate_action_raw.copy()
+
             else:
                 action_raw = _to_float32_array(
                     step["action"]
