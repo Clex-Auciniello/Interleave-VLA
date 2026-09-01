@@ -34,55 +34,39 @@ class TorchRLDSInterleavedDataset:
                 # goal_relabeling_strategy="uniform",   # no neeed for goal relabeling
                 window_size=config.window_size,
                 action_horizon=config.action_horizon,
-                subsample_length=100,
+                subsample_length=None,
                 skip_unlabeled=config.skip_unlabeled,  # skip ones without language annotation
             ),
             frame_transform_kwargs=dict(
                 image_augment_kwargs={
                     "primary": dict(
-                        random_resized_crop=dict(
-                            scale=[0.8, 1.0],
-                            ratio=[0.9, 1.1],
-                        ),
-                        random_brightness=[0.1],
-                        random_contrast=[0.9, 1.1],
-                        random_saturation=[0.9, 1.1],
-                        random_hue=[0.05],
+                        random_brightness=[0.05],
+                        random_contrast=[0.95, 1.05],
+                        random_saturation=[0.95, 1.05],
                         augment_order=[
-                            "random_resized_crop",
                             "random_brightness",
                             "random_contrast",
                             "random_saturation",
-                            "random_hue",
                         ],
                     ),
                     "wrist": dict(
-                        random_brightness=[0.1],
-                        random_contrast=[0.9, 1.1],
-                        random_saturation=[0.9, 1.1],
-                        random_hue=[0.05],
+                        random_brightness=[0.05],
+                        random_contrast=[0.95, 1.05],
+                        random_saturation=[0.95, 1.05],
                         augment_order=[
                             "random_brightness",
                             "random_contrast",
                             "random_saturation",
-                            "random_hue",
                         ],
                     ),
                     "interleaved_instruction": dict(
-                        random_resized_crop=dict(
-                            scale=[0.8, 1.0],
-                            ratio=[0.9, 1.1],
-                        ),
-                        random_brightness=[0.1],
-                        random_contrast=[0.9, 1.1],
-                        random_saturation=[0.9, 1.1],
-                        random_hue=[0.05],
+                        random_brightness=[0.05],
+                        random_contrast=[0.95, 1.05],
+                        random_saturation=[0.95, 1.05],
                         augment_order=[
-                            "random_resized_crop",
                             "random_brightness",
                             "random_contrast",
                             "random_saturation",
-                            "random_hue",
                         ],
                     ),
                 },

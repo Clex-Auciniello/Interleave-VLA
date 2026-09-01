@@ -537,6 +537,16 @@ OXE_DATASET_CONFIGS = {
         "proprio_encoding": ProprioEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+    "ur5e_interleave": {
+        "image_obs_keys": {
+            "primary": "image_0",
+            "secondary": None,
+            "wrist": "image_1",
+        },
+        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
+        "proprio_encoding": ProprioEncoding.POS_EULER,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
     "bridge_onehot_interleave": {
         "image_obs_keys": {"primary": "image_0", "secondary": "image_1", "wrist": None},
         "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},

@@ -39,6 +39,11 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["proprio"] = trajectory["observation"]["state"]
     return trajectory
 
+def ur5e_interleave_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    
+    trajectory["observation"]["proprio"] = trajectory["observation"]["state"]
+    return trajectory
+
 
 def rt1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # make gripper action absolute action, +1 = open, 0 = close
@@ -1065,6 +1070,7 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     # ================================== interleave ===================================================
     "fractal_interleave": fractal_interleave_transform,
     "bridge_interleave": bridge_dataset_transform,
+    "ur5e_interleave": ur5e_interleave_transform,
     "bridge_onehot_interleave": bridge_dataset_transform,
     "fanuc_dataset": fanuc_dataset_transform,
     "fanuc_interleave": fanuc_dataset_transform,

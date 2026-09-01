@@ -10,6 +10,10 @@ BRIDGE_MIX = [
     ("bridge_dataset", 1.0),
 ]
 
+UR5E_INTERLEAVE_MIX = [
+    ("ur5e_interleave", 1.0),
+]
+
 FRACTAL_MIX = [
     ("fractal20220817_data", 1.0),
 ]
@@ -212,6 +216,7 @@ OXE_INTERLEAVE_PRETRAIN = [
 
 OXE_NAMED_MIXES = {
     "bridge": BRIDGE_MIX,
+    "ur5e_interleave": UR5E_INTERLEAVE_MIX,
     "fractal": FRACTAL_MIX,
     "rtx": RT_X_MIX,
     "rtx_franka": RT_X_MIX + OXE_FRANKA_MIX,
