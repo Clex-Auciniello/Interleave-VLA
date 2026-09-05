@@ -14,6 +14,15 @@ log = logging.getLogger(__name__)
 class TorchRLDSInterleavedDataset:
     @log_execution_time(log)
     def __init__(self, config, train=True):
+        balance_by_task = (
+            train and config.get("balance_by_task", False)
+        )
+        repeat_dataset = config.get("repeat_dataset", True)
+
+        if balance_by_task and repeat_dataset:
+            raise ValueError(
+                "Task-balanced training requires repeat_dataset=False."
+            )
         dataset_kwargs_list, sample_weights = make_oxe_dataset_kwargs_and_weights(
             config.dataset_mix,
             config.data_path,
@@ -30,6 +39,7 @@ class TorchRLDSInterleavedDataset:
             shuffle_buffer_size=config.shuffle_buffer_size,
             batch_size=None,  # batching will be handles in PyTorch Dataloader object
             balance_weights=True,
+            repeat_dataset=repeat_dataset,
             traj_transform_kwargs=dict(
                 # goal_relabeling_strategy="uniform",   # no neeed for goal relabeling
                 window_size=config.window_size,
@@ -82,4 +92,20 @@ class TorchRLDSInterleavedDataset:
         )
 
         # convert for torch
-        self.dataset = TorchRLDSDataset(dataset, train=train)
+        self.dataset = TorchRLDSDataset(
+            dataset,
+            train=train,
+            balance_by_task=balance_by_task,
+            task_sample_counts=config.get(
+                "task_sample_counts",
+                None,
+            ),
+            samples_per_task=config.get(
+                "samples_per_task",
+                None,
+            ),
+            seed=config.get(
+                "balance_seed",
+                42,
+            ),
+        )

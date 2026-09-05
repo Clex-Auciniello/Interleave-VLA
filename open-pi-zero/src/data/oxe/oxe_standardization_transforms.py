@@ -42,6 +42,10 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 def ur5e_interleave_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     
     trajectory["observation"]["proprio"] = trajectory["observation"]["state"]
+    trajectory["task_id"] = tf.cast(
+        trajectory["traj_metadata"]["episode_metadata"]["task_id"],
+        tf.int32,
+    )
     return trajectory
 
 

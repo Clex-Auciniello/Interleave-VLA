@@ -14,6 +14,11 @@ pretrained_model_path: ${oc.env:TRANSFORMERS_CACHE}/paligemma-3b-pt-224
 load_pretrained_weights: True
 resume_checkpoint_path: ${oc.env:INTERLEAVE_CHECKPOINT}
 resume_checkpoint_step: False
+
+# The Bridge checkpoint has no LoRA parameters.
+# Set to False when doing a true resume from an UR5e LoRA checkpoint.
+allow_missing_lora_weights: True
+
 freeze_vision_model: False # with LoRA, keep the vision LoRA adapters trainable
 train_vlm: True
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
@@ -44,10 +49,35 @@ data:
     dataset_mix: ur5e_interleave
     split: train
     data_path: ${oc.env:VLA_DATA_DIR}
+
     window_size: ${cond_steps}
     action_horizon: ${horizon_steps}
     skip_unlabeled: True
     load_proprio: True
+
+    # Finite training dataset: required by task-balanced oversampling.
+    repeat_dataset: False
+
+    # Each optimizer update receives exactly one sample from each task.
+    balance_by_task: True
+    balance_seed: ${seed}
+
+    task_sample_counts:
+      0: 1906
+      1: 1808
+      2: 2124
+      3: 1988
+      4: 2134
+      5: 1844
+      6: 2208
+      7: 1837
+      8: 1936
+      9: 2075
+      10: 1938
+      11: 2199
+
+    samples_per_task: 2208
+
     shuffle_buffer_size: 10000
     num_parallel_calls: 4
     traj_transform_threads: 4
@@ -59,18 +89,23 @@ wandb:
   run: ${now:%H-%M-%S}_${name}
 
 log_freq: 120  # counted in microbatches: every 10 updates with the single-GPU batch settings below
-num_train_samples: 23997  # measured train transitions before the loader's hardcoded subsample_length=100
+
+num_original_train_samples: 23997  # original flattened train samples before task balancing
+num_balanced_train_samples: 26496  # samples produced per epoch after task balancing
+
 n_epochs: 30  # logical dataset passes used only to derive n_updates
-updates_per_epoch: ${eval:'(${num_train_samples} + ${global_batch_size} - 1) // ${global_batch_size}'}
+# 26496 samples / global batch 12 = 2208 optimizer updates per epoch.
+updates_per_epoch: 2208
 n_updates: ${eval:'${updates_per_epoch} * ${n_epochs}'}
+
 save_every_n_epochs: 1
 save_model_freq: ${eval:'${updates_per_epoch} * ${save_every_n_epochs}'}
 save_model_start: 0  # the trainer uses cnt_update > save_model_start, so this includes the first epoch
+
 eval_every_n_epochs: 1
-# eval_freq is counted in per-device microbatches, not optimizer updates.
-# This expression assumes the intended single-GPU run.
-eval_freq: ${eval:'${updates_per_epoch} * (${global_batch_size} // ${per_device_batch_size}) * ${eval_every_n_epochs}'}
-eval_size: 1227
+# eval_freq is counted in optimizer updates.
+eval_freq: ${eval:'${updates_per_epoch} * ${eval_every_n_epochs}'}
+num_val_samples: 1227
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 
 global_batch_size: 12
@@ -96,8 +131,8 @@ final_action_clip_value: 1.0  # data normalized in [-1,1]
 
 cond_steps: 1
 horizon_steps: 4
-action_dim: 7 # EEF_POS
-proprio_dim: 7  # POS_EULER
+action_dim: 7   # delta xyz + delta RPY + gripper
+proprio_dim: 7  # absolute xyz + RPY + gripper
 max_seq_len: 540  # 256 observation-image tokens + 256 instruction-image tokens + text/special tokens
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}

@@ -6,6 +6,7 @@ Main training agent. Using torch.compile and bfloat16 by default. Optionally (Q)
 import logging
 import os
 from collections import deque
+import shutil
 
 import bitsandbytes as bnb
 import einops
@@ -498,56 +499,270 @@ class TrainAgent:
                 cnt_batch += 1
                 if cnt_update >= self.n_updates:
                     return
-
-    @main_rank_only
-    @log_execution_time(log)
-    def save_training(self, cnt_update: int, cnt_batch: int, main_rank: bool):
+    def _build_training_checkpoint(
+        self,
+        cnt_update: int,
+        cnt_batch: int,
+    ):
         avg_state = self.model_averaging.state_dict()
         model_type = avg_state.get("model_type", "normal")
         n_averaged = avg_state.get("n_averaged", 1)
+
         if avg_state:
             weights = avg_state["state_dict"]
         elif self.multi_gpu:
             weights = self.model.module.state_dict()
         else:
             weights = self.model.state_dict()
+
         data = {
             "cnt_update": cnt_update,
             "cnt_batch": cnt_batch,
             "model": weights,
             "action_optimizer": self.action_optimizer.state_dict(),
-            "vlm_optimizer": self.vlm_optimizer.state_dict()
-            if self.train_vlm
-            else None,
+            "vlm_optimizer": (
+                self.vlm_optimizer.state_dict()
+                if self.train_vlm
+                else None
+            ),
             "action_lr_scheduler": self.action_lr_scheduler.state_dict(),
-            "vlm_lr_scheduler": self.vlm_lr_scheduler.state_dict()
-            if self.train_vlm
-            else None,
+            "vlm_lr_scheduler": (
+                self.vlm_lr_scheduler.state_dict()
+                if self.train_vlm
+                else None
+            ),
             "wandb_id": wandb.run.id if self.use_wandb else None,
             "n_averaged": n_averaged,
+
+            # Best validation state, needed for a correct resume.
+            "best_eval_l1": getattr(
+                self,
+                "best_eval_l1",
+                float("inf"),
+            ),
+            "best_step": getattr(
+                self,
+                "best_step",
+                None,
+            ),
         }
-        savepath = os.path.join(self.checkpoint_dir, f"step{cnt_update}.pt")
+
+        return data, model_type, n_averaged
+
+
+    def _prune_training_checkpoints(self, keep_last: int = 2):
+        checkpoints = []
+
+        for filename in os.listdir(self.checkpoint_dir):
+            if not filename.startswith("step"):
+                continue
+
+            if not filename.endswith(".pt"):
+                continue
+
+            step_string = filename[len("step") : -len(".pt")]
+
+            if not step_string.isdigit():
+                continue
+
+            checkpoints.append(
+                (
+                    int(step_string),
+                    os.path.join(self.checkpoint_dir, filename),
+                )
+            )
+
+        checkpoints.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        for step, path in checkpoints[keep_last:]:
+            os.remove(path)
+            log.info(
+                f"Removed old checkpoint: {path}"
+            )
+            
+    @main_rank_only
+    @log_execution_time(log)
+    def save_training(
+        self,
+        cnt_update: int,
+        cnt_batch: int,
+        main_rank: bool,
+    ):
+        data, model_type, n_averaged = (
+            self._build_training_checkpoint(
+                cnt_update,
+                cnt_batch,
+            )
+        )
+
+        savepath = os.path.join(
+            self.checkpoint_dir,
+            f"step{cnt_update}.pt",
+        )
+
         torch.save(data, savepath)
-        checkpoint_size_in_gb = os.path.getsize(savepath) / (1024**3)
+
+        checkpoint_size_in_gb = (
+            os.path.getsize(savepath) / (1024**3)
+        )
+
         log.info(
-            f"Saved model to {savepath}, size: {checkpoint_size_in_gb:.2f} GB, type: {model_type}, averaged: {n_averaged}"
+            f"Saved model to {savepath}, "
+            f"size: {checkpoint_size_in_gb:.2f} GB, "
+            f"type: {model_type}, "
+            f"averaged: {n_averaged}"
+        )
+
+        # Keep only the two most recent resumable checkpoints.
+        self._prune_training_checkpoints(
+            keep_last=2,
+        )
+
+    @main_rank_only
+    @log_execution_time(log)
+    def save_best_training(
+        self,
+        cnt_update: int,
+        cnt_batch: int,
+        main_rank: bool,
+    ):
+        best_path = os.path.join(
+            self.checkpoint_dir,
+            "best.pt",
+        )
+
+        current_step_path = os.path.join(
+            self.checkpoint_dir,
+            f"step{cnt_update}.pt",
+        )
+
+        # If this update was already saved as a regular checkpoint,
+        # simply copy the complete resumable checkpoint.
+        if os.path.exists(current_step_path):
+            shutil.copy2(
+                current_step_path,
+                best_path,
+            )
+
+            log.info(
+                f"Updated best checkpoint from "
+                f"{current_step_path} -> {best_path}"
+            )
+            return
+
+        # Otherwise save a complete checkpoint specifically as best.pt.
+        data, model_type, n_averaged = (
+            self._build_training_checkpoint(
+                cnt_update,
+                cnt_batch,
+            )
+        )
+
+        torch.save(
+            data,
+            best_path,
+        )
+
+        checkpoint_size_in_gb = (
+            os.path.getsize(best_path) / (1024**3)
+        )
+
+        log.info(
+            f"Saved new best model to {best_path}, "
+            f"step: {cnt_update}, "
+            f"validation L1: {self.best_eval_l1:.6f}, "
+            f"size: {checkpoint_size_in_gb:.2f} GB, "
+            f"type: {model_type}, "
+            f"averaged: {n_averaged}"
         )
 
     @log_execution_time(log)
-    def load_checkpoint(self, path: str):
-        """load to cpu first, then move to gpu"""
-        data = torch.load(path, weights_only=True, map_location="cpu")
+    def load_checkpoint(
+        self,
+        path: str,
+        allow_missing_lora_weights: bool = False,
+    ):
+        """Load checkpoint to CPU first, then move model to GPU."""
+
+        data = torch.load(
+            path,
+            weights_only=True,
+            map_location="cpu",
+        )
+
         self.cnt_update = data["cnt_update"]
         self.cnt_batch = data["cnt_batch"]
         self.wandb_id = data["wandb_id"]
-        data["model"] = {
-            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
-        }  # remove "_orig_mod." prefix if saved model was compiled
-        self.model.load_state_dict(data["model"], strict=True)
-        log.info(
-            f"Loaded model from {path} at update {self.cnt_update} batch {self.cnt_batch}"
+
+        self.best_eval_l1 = data.get(
+            "best_eval_l1",
+            float("inf"),
+        )
+        self.best_step = data.get(
+            "best_step",
+            None,
         )
 
+        model_state = {
+            k.replace("_orig_mod.", ""): v
+            for k, v in data["model"].items()
+        }
+
+        if not allow_missing_lora_weights:
+            self.model.load_state_dict(
+                model_state,
+                strict=True,
+            )
+
+        else:
+            incompatible_keys = self.model.load_state_dict(
+                model_state,
+                strict=False,
+            )
+
+            missing_keys = list(
+                incompatible_keys.missing_keys
+            )
+            unexpected_keys = list(
+                incompatible_keys.unexpected_keys
+            )
+
+            invalid_missing_keys = [
+                key
+                for key in missing_keys
+                if (
+                    "lora_A" not in key
+                    and "lora_B" not in key
+                )
+            ]
+
+            if invalid_missing_keys:
+                raise RuntimeError(
+                    "Checkpoint is missing non-LoRA model weights:\n"
+                    + "\n".join(invalid_missing_keys)
+                )
+
+            if unexpected_keys:
+                raise RuntimeError(
+                    "Checkpoint contains unexpected model weights:\n"
+                    + "\n".join(unexpected_keys)
+                )
+
+            log.info(
+                "Checkpoint loaded with %d missing LoRA weights.",
+                len(missing_keys),
+            )
+
+        log.info(
+            f"Loaded model from {path} "
+            f"at update {self.cnt_update} "
+            f"batch {self.cnt_batch}"
+        )
+
+    
     @log_execution_time(log)
     def load_optimizer(self, path: str):
         """load to cpu first, then move to gpu"""

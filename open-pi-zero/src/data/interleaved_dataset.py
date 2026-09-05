@@ -50,6 +50,7 @@ def make_dataset_from_rlds(
     ignore_errors: bool = False,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
+    statistics_split: str = "train",
 ) -> Tuple[dl.DLataset, dict, int]:
     """
     This function is responsible for loading a specific RLDS dataset from storage and getting it into a standardized
@@ -175,14 +176,20 @@ def make_dataset_from_rlds(
             else:
                 raise ValueError("Unexpected Error")
 
-        traj = {
+        restructured_traj = {
             "observation": new_obs,
             "task": task,
             "action": tf.cast(traj["action"], tf.float32),
             # "state": tf.cast(old_obs["state"], tf.float32), # current state in action space
             "dataset_name": tf.repeat(name, traj_len),
         }
-        return traj
+        # Preserve optional task metadata for downstream task-balanced sampling.
+        if "task_id" in traj:
+            restructured_traj["task_id"] = tf.cast(
+                traj["task_id"],
+                tf.int32,
+            )
+        return restructured_traj
 
     def is_nonzero_length(traj):
         return tf.shape(traj["action"])[0] > 0
@@ -194,7 +201,7 @@ def make_dataset_from_rlds(
         with tf.io.gfile.GFile(dataset_statistics, "r") as f:
             dataset_statistics = json.load(f)
     elif dataset_statistics is None:
-        full_dataset = dl.DLataset.from_rlds(builder, split="all", shuffle=False)
+        full_dataset = dl.DLataset.from_rlds(builder, split=statistics_split, shuffle=False)
         for filter_fcn_spec in filter_functions:
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
         if ignore_errors:
@@ -206,6 +213,7 @@ def make_dataset_from_rlds(
             hash_dependencies=(
                 str(builder.info),
                 str(proprio_obs_key),
+                str(statistics_split),
                 (
                     ModuleSpec.to_string(standardize_fn)
                     if standardize_fn is not None
@@ -502,6 +510,7 @@ def make_interleaved_dataset(
     split: Optional[str] = None,
     batch_size: Optional[int] = None,
     balance_weights: bool = True,
+    repeat_dataset: bool = True,
     traj_transform_threads: Optional[int] = None,
     traj_read_threads: Optional[int] = None,
 ) -> dl.DLataset:
@@ -571,8 +580,12 @@ def make_interleaved_dataset(
         reads_per_dataset,
     ):
         dataset_statistics = all_dataset_statistics[dataset_kwargs["name"]]
+
+        load_kwargs = dict(dataset_kwargs)
+        load_kwargs["shuffle"] = train
+
         dataset, _, dataset_len = make_dataset_from_rlds(
-            **dataset_kwargs,
+            **load_kwargs,
             train=train,
             split=split,
             num_parallel_calls=threads,
@@ -580,8 +593,12 @@ def make_interleaved_dataset(
             dataset_statistics=dataset_statistics,
         )
         dataset_true_lengths.append(dataset_len)
+
+        if train and repeat_dataset:
+            dataset = dataset.repeat()
+
         dataset = apply_trajectory_transforms(
-            dataset.repeat(),
+            dataset,
             **traj_transform_kwargs,
             dataset_statistics=dataset_statistics,
             num_parallel_calls=threads,
@@ -592,7 +609,10 @@ def make_interleaved_dataset(
     # interleave at the frame level and then shuffle
     dataset: dl.DLataset = dl.DLataset.sample_from_datasets(
         datasets, sample_weights
-    ).shuffle(shuffle_buffer_size)
+    )
+
+    if train:
+        dataset = dataset.shuffle(shuffle_buffer_size)
 
     # apply frame transforms
     dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)

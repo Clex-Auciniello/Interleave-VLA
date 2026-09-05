@@ -5,7 +5,7 @@ Main training agent. Using torch.compile and bfloat16 by default. Optionally (Q)
 
 import logging
 import os
-from collections import deque
+from collections import Counter, deque
 
 import bitsandbytes as bnb
 import einops
@@ -94,13 +94,30 @@ class InterleavedTrainAgent(TrainAgent):
             )  # since the weights have requires_grad=False. However, we are not excluding the weights from the optimizer yet!
         self.model = InterleavedPiZero(cfg, use_ddp=self.multi_gpu)
         if cfg.resume_checkpoint_path:
-            self.load_checkpoint(cfg.resume_checkpoint_path)
+            self.load_checkpoint(
+                cfg.resume_checkpoint_path,
+                allow_missing_lora_weights=cfg.get(
+                    "allow_missing_lora_weights",
+                    False,
+                ),
+            )
             if not cfg.resume_checkpoint_step:
                 del self.cnt_batch
                 del self.cnt_update
                 del self.wandb_id
+
+                # The checkpoint is only used as initialization,
+                # not as a continuation of its previous training.
+                self.best_eval_l1 = float("inf")
+                self.best_step = None
         elif cfg.load_pretrained_weights:
             self.model.load_pretrained_weights()
+        if not hasattr(self, "best_eval_l1"):
+            self.best_eval_l1 = float("inf")
+
+        if not hasattr(self, "best_step"):
+            self.best_step = None
+
         self.model.tie_action_proprio_weights()
         self.model.freeze_unused_weights()
         if cfg.lora:
@@ -148,6 +165,48 @@ class InterleavedTrainAgent(TrainAgent):
             cfg.per_device_batch_size * self.grad_accumulation_steps * world_size
         )
 
+        # Task-balanced training configuration.
+        self.balance_by_task = bool(
+            cfg.data.train.get("balance_by_task", False)
+        )
+
+        task_sample_counts = cfg.data.train.get(
+            "task_sample_counts",
+            None,
+        )
+
+        if task_sample_counts is not None:
+            self.task_ids = tuple(
+                sorted(int(task_id) for task_id in task_sample_counts.keys())
+            )
+        else:
+            self.task_ids = ()
+
+        if self.balance_by_task:
+            if self.multi_gpu:
+                raise ValueError(
+                    "Task-balanced UR5e training currently supports single-GPU only."
+                )
+
+            if not self.task_ids:
+                raise ValueError(
+                    "task_sample_counts must be provided when balance_by_task=True."
+                )
+
+            if actual_global_batch_size != len(self.task_ids):
+                raise ValueError(
+                    "For the current balanced training setup, the effective global "
+                    f"batch size must equal the number of tasks. Got "
+                    f"global_batch_size={actual_global_batch_size} and "
+                    f"num_tasks={len(self.task_ids)}."
+                )
+
+            log.info(
+                "Task-balanced training enabled: %d tasks, "
+                "one sample per task per optimizer update.",
+                len(self.task_ids),
+            )
+
         # dataloader --- spawn one for each rank, num_workers=0
         self.train_dataloader = DataLoader(
             TorchRLDSInterleavedDataset(cfg.data.train, train=True).dataset,
@@ -156,19 +215,25 @@ class InterleavedTrainAgent(TrainAgent):
         )
         self.run_eval = cfg.data.get("val", False)
         if self.run_eval:
-            cfg_data_val = OmegaConf.merge(cfg.data.train, cfg.data.val)
-            self.val_dataiterator = iter(
-                DataLoader(
-                    TorchRLDSInterleavedDataset(cfg_data_val, train=False).dataset,
-                    batch_size=cfg.per_device_batch_size,
-                    pin_memory=True,
-                )
+
+            self.expected_num_val_samples = cfg.get(
+                "num_val_samples",
+                None,
             )
+            cfg_data_val = OmegaConf.merge(cfg.data.train, cfg.data.val)
+
+            self.val_dataloader = DataLoader(
+                TorchRLDSInterleavedDataset(
+                    cfg_data_val,
+                    train=False,
+                ).dataset,
+                batch_size=cfg.per_device_batch_size,
+                pin_memory=True,
+            )
+
+            
             self.eval_thresholds = cfg.eval_thresholds
             self.eval_freq = cfg.eval_freq
-            self.per_device_num_eval_batch = (
-                cfg.eval_size // cfg.per_device_batch_size // world_size
-            )
         log.info(f"Total length of dataset: {len(self.train_dataloader.dataset)}")
         log.info(f"Total number of gradient updates: {self.n_updates}")
         log.info(f"Global batch size: {actual_global_batch_size}")
@@ -257,6 +322,10 @@ class InterleavedTrainAgent(TrainAgent):
         loss_deque = deque(maxlen=self.grad_accumulation_steps)
         new_eval_from_last_log = False
 
+        # Task IDs contributing to the current optimizer update.
+        accumulated_task_ids = []
+
+
         # deal with the various model.module
         model_meta = self.model
         if self.multi_gpu:
@@ -331,6 +400,28 @@ class InterleavedTrainAgent(TrainAgent):
                 action (torch.Size([bsz, window, horizon, action_dim], float32)
                 action_pad_mask (torch.Size([bsz, window, horizon, action_dim]))
                 """
+                is_optimizer_step = (
+                    (cnt_batch + 1) % self.grad_accumulation_steps == 0
+                )
+                did_optimizer_step = False
+                should_save_checkpoint = False
+                new_best_checkpoint = False
+
+                if self.balance_by_task:
+                    if "task_id" not in batch:
+                        raise KeyError(
+                            "Balanced training requires 'task_id' in every training batch."
+                        )
+
+                    batch_task_ids = (
+                        torch.as_tensor(batch["task_id"])
+                        .reshape(-1)
+                        .tolist()
+                    )
+
+                    accumulated_task_ids.extend(
+                        int(task_id) for task_id in batch_task_ids
+                    )
                 inputs = preprocess_batch(batch, split_mask=False, sample_fm_time=True)
                 if self.debug and cnt_batch == 0:
                     images = batch["observation"]["image_primary"]
@@ -338,7 +429,7 @@ class InterleavedTrainAgent(TrainAgent):
                     actions = batch["action"].squeeze(1)
                     texts = [
                         text.decode("utf-8")
-                        for text in batch["task"]["language_instruction"]
+                        for text in batch["task"]["interleaved_instruction"]["language_instruction"]
                     ]
                     log.info(f"{self.gpu_id} device {self.device}")
                     log.info(f"{self.gpu_id} texts {texts}")
@@ -356,7 +447,7 @@ class InterleavedTrainAgent(TrainAgent):
                     image.save(os.path.join(self.log_dir, f"image_{self.gpu_id}.png"))
 
                 # make sure only syncing when taking gradient steps
-                if (cnt_batch + 1) % self.grad_accumulation_steps != 0:
+                if not is_optimizer_step:
                     with model_meta.no_sync():
                         with torch.autocast(
                             device_type="cuda", dtype=self.dtype, enabled=self.use_amp
@@ -367,6 +458,21 @@ class InterleavedTrainAgent(TrainAgent):
                         normalized_loss = loss / self.grad_accumulation_steps
                         normalized_loss.backward()
                 else:
+                    if self.balance_by_task:
+                        observed_counts = Counter(accumulated_task_ids)
+
+                        expected_counts = {
+                            task_id: 1
+                            for task_id in self.task_ids
+                        }
+
+                        if observed_counts != expected_counts:
+                            raise RuntimeError(
+                                "Unbalanced optimizer batch.\n"
+                                f"Expected: {expected_counts}\n"
+                                f"Observed: {dict(observed_counts)}\n"
+                                f"Sequence: {accumulated_task_ids}"
+                            )
                     with torch.autocast(
                         device_type="cuda", dtype=self.dtype, enabled=self.use_amp
                     ):
@@ -394,6 +500,17 @@ class InterleavedTrainAgent(TrainAgent):
                     if self.train_vlm:
                         self.vlm_optimizer.zero_grad(set_to_none=True)
                     cnt_update += 1
+                    did_optimizer_step = True
+                    should_save_checkpoint = (
+                        (
+                            cnt_update % self.save_model_freq == 0
+                            and cnt_update > self.save_model_start
+                        )
+                        or cnt_update == self.n_updates
+                    )
+
+                    if self.balance_by_task:
+                        accumulated_task_ids.clear()
 
                     # initialize ema/swa
                     self.model_averaging.maybe_initialize(cnt_update)
@@ -401,15 +518,16 @@ class InterleavedTrainAgent(TrainAgent):
                     # update ema/swa
                     self.model_averaging.maybe_update(cnt_update)
 
-                    # save model at the end of update, models just synced
-                    if (
-                        cnt_update % self.save_model_freq == 0
-                        and cnt_update > self.save_model_start
-                    ) or cnt_update == self.n_updates:
-                        self.save_training(
-                            cnt_update, cnt_batch, main_rank=self.main_rank
-                        )
-                        dist.barrier()
+                    # # save model at the end of update, models just synced
+                    # if (
+                    #     cnt_update % self.save_model_freq == 0
+                    #     and cnt_update > self.save_model_start
+                    # ) or cnt_update == self.n_updates:
+                    #     self.save_training(
+                    #         cnt_update, cnt_batch + 1, main_rank=self.main_rank
+                    #     )
+                    #     if self.multi_gpu:
+                    #         dist.barrier()
 
                 # aggregate loss
                 if self.multi_gpu:
@@ -419,9 +537,9 @@ class InterleavedTrainAgent(TrainAgent):
                     loss_deque.append(loss.item())
 
                 # validation with action accuracy
-                if self.run_eval and (cnt_batch + 1) % self.eval_freq == 0:
+                if self.run_eval and did_optimizer_step and cnt_update % self.eval_freq == 0:
                     log.info(
-                        f"Running evaluation for {self.per_device_num_eval_batch} batches..."
+                        f"Running evaluation on the full validation set..."
                     )
                     new_eval_from_last_log = True
                     model_meta.eval()
@@ -430,15 +548,17 @@ class InterleavedTrainAgent(TrainAgent):
                         len(self.eval_thresholds), device=self.device
                     )
                     eval_l1_loss = torch.tensor(0.0, device=self.device)
+                    num_eval_batches = 0
+                    num_eval_samples = 0
                     with torch.inference_mode():
-                        for _ in range(self.per_device_num_eval_batch):
-                            batch_eval = next(self.val_dataiterator)
+                        for batch_eval in self.val_dataloader:
                             inputs = preprocess_batch(
                                 batch_eval,
                                 split_mask=True,
                                 sample_fm_time=False,
                             )
                             gt_actions = inputs.pop("actions")
+                            num_eval_samples += gt_actions.shape[0]
                             preds = model_eval.infer_action(**inputs)
 
                             if torch.isnan(preds).any() or torch.isinf(preds).any():
@@ -451,11 +571,45 @@ class InterleavedTrainAgent(TrainAgent):
                             eval_l1_loss += torch.nn.functional.l1_loss(
                                 preds, gt_actions
                             )
+                            num_eval_batches += 1
                     model_meta.train()
 
+                    if num_eval_batches == 0:
+                            raise RuntimeError(
+                                "Validation dataloader produced zero batches."
+                            )
+                    
+                    if (
+                        self.expected_num_val_samples is not None
+                        and num_eval_samples != int(self.expected_num_val_samples)
+                    ):
+                        raise RuntimeError(
+                            "Unexpected validation size. "
+                            f"Expected {self.expected_num_val_samples}, "
+                            f"observed {num_eval_samples}."
+                        )
                     # get stats
-                    eval_accuracy = eval_accuracy / self.per_device_num_eval_batch
-                    eval_l1_loss = eval_l1_loss / self.per_device_num_eval_batch
+                    eval_accuracy = eval_accuracy / num_eval_batches
+                    eval_l1_loss = eval_l1_loss / num_eval_batches
+                    current_eval_l1 = eval_l1_loss.item()
+
+                    if current_eval_l1 < self.best_eval_l1:
+                        previous_best = self.best_eval_l1
+
+                        self.best_eval_l1 = current_eval_l1
+                        self.best_step = cnt_update
+                        new_best_checkpoint = True
+
+                        log.info(
+                            f"New best validation L1: "
+                            f"{self.best_eval_l1:.6f} "
+                            f"at update {self.best_step} "
+                            f"(previous: {previous_best:.6f})"
+                        )
+
+                    log.info(
+                        f"Validation batches processed: {num_eval_batches}"
+                    )
                     if self.multi_gpu:
                         dist.all_reduce(eval_accuracy, op=dist.ReduceOp.SUM)
                         dist.all_reduce(eval_l1_loss, op=dist.ReduceOp.SUM)
@@ -471,6 +625,30 @@ class InterleavedTrainAgent(TrainAgent):
                         ]
                     )
                     log.info(log_msg)
+
+                if did_optimizer_step:
+                    if should_save_checkpoint:
+                        self.save_training(
+                            cnt_update,
+                            cnt_batch + 1,
+                            main_rank=self.main_rank,
+                        )
+
+                    if new_best_checkpoint:
+                        self.save_best_training(
+                            cnt_update,
+                            cnt_batch + 1,
+                            main_rank=self.main_rank,
+                        )
+
+                    if (
+                        self.multi_gpu
+                        and (
+                            should_save_checkpoint
+                            or new_best_checkpoint
+                        )
+                    ):
+                        dist.barrier()
 
                 # log loss
                 if cnt_batch % self.log_freq == 0:
