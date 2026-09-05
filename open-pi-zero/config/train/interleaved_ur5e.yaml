@@ -78,10 +78,10 @@ data:
 
     samples_per_task: 2208
 
-    shuffle_buffer_size: 10000
-    num_parallel_calls: 4
-    traj_transform_threads: 4
-    traj_read_threads: 4
+    shuffle_buffer_size: 1000
+    num_parallel_calls: 2
+    traj_transform_threads: 2
+    traj_read_threads: 2
 
 wandb:
   entity: ${oc.env:VLA_WANDB_ENTITY}
