@@ -15,7 +15,7 @@ UR5E_INTERLEAVE_MIX = [
 ]
 
 UR5E_INTERLEAVE_GROUNDING_BIN_MIX = [
-    ("ur5e_interleave", 1.0),
+    ("ur5e_interleave_grounding_bin", 1.0),
 ]
 
 FRACTAL_MIX = [
