@@ -383,33 +383,76 @@ def _extract_bin_grounding_image(
     group_width = group_x_max - group_x_min
     group_height = group_y_max - group_y_min
 
-    # ---------------------------------------------------------
-    # 4. Add context around the four-bin group.
-    # ---------------------------------------------------------
-
-    x_margin = group_width * BIN_GROUP_MARGIN_RATIO
-    y_margin = group_height * BIN_GROUP_MARGIN_RATIO
-
     image_height, image_width = front_image.shape[:2]
 
-    crop_x_min = int(
-        max(0, np.floor(group_x_min - x_margin))
+    # Center of the complete bin group.
+    group_center_x = 0.5 * (group_x_min + group_x_max)
+    group_center_y = 0.5 * (group_y_min + group_y_max)
+
+    # Use the largest dimension so that all four bins fit in a square.
+    square_size = max(group_width, group_height)
+
+    # Add context around the group.
+    square_size *= (1.0 + 2.0 * BIN_GROUP_MARGIN_RATIO)
+
+    # A square crop cannot be larger than the source frame.
+    square_size = min(
+        square_size,
+        image_width,
+        image_height,
     )
-    crop_y_min = int(
-        max(0, np.floor(group_y_min - y_margin))
-    )
-    crop_x_max = int(
-        min(image_width, np.ceil(group_x_max + x_margin))
-    )
-    crop_y_max = int(
-        min(image_height, np.ceil(group_y_max + y_margin))
-    )
+
+    square_size = int(np.ceil(square_size))
+
+    # Initial square centered on the four bins.
+    crop_x_min = int(round(group_center_x - square_size / 2))
+    crop_y_min = int(round(group_center_y - square_size / 2))
+
+    crop_x_max = crop_x_min + square_size
+    crop_y_max = crop_y_min + square_size
+
+    # Shift the square if it goes outside the image.
+    # We shift instead of clipping so that the crop remains square.
+
+    if crop_x_min < 0:
+        crop_x_max -= crop_x_min
+        crop_x_min = 0
+
+    if crop_x_max > image_width:
+        shift = crop_x_max - image_width
+        crop_x_min -= shift
+        crop_x_max = image_width
+
+    if crop_y_min < 0:
+        crop_y_max -= crop_y_min
+        crop_y_min = 0
+
+    if crop_y_max > image_height:
+        shift = crop_y_max - image_height
+        crop_y_min -= shift
+        crop_y_max = image_height
+
+    # Final safety clipping.
+    crop_x_min = max(0, crop_x_min)
+    crop_y_min = max(0, crop_y_min)
+    crop_x_max = min(image_width, crop_x_max)
+    crop_y_max = min(image_height, crop_y_max)
 
     if crop_x_max <= crop_x_min or crop_y_max <= crop_y_min:
         raise ValueError(
             f"Invalid four-bin crop in episode {episode_id}: "
             f"({crop_x_min}, {crop_y_min}, "
             f"{crop_x_max}, {crop_y_max})"
+        )
+
+    # Important sanity check: aspect ratio must remain approximately 1:1.
+    crop_width = crop_x_max - crop_x_min
+    crop_height = crop_y_max - crop_y_min
+
+    if abs(crop_width - crop_height) > 1:
+        raise ValueError(
+            f"Four-bin crop is not square in episode {episode_id}: "
+            f"{crop_width}x{crop_height}"
         )
 
     bin_crop = front_image[
