@@ -1075,6 +1075,7 @@ OXE_STANDARDIZATION_TRANSFORMS = {
     "fractal_interleave": fractal_interleave_transform,
     "bridge_interleave": bridge_dataset_transform,
     "ur5e_interleave": ur5e_interleave_transform,
+    "ur5e_interleave_grounding_bin": ur5e_interleave_transform,
     "bridge_onehot_interleave": bridge_dataset_transform,
     "fanuc_dataset": fanuc_dataset_transform,
     "fanuc_interleave": fanuc_dataset_transform,
