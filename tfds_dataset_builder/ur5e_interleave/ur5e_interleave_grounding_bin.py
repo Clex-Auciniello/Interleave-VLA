@@ -41,9 +41,10 @@ BIN_BBOX_KEYS = (
     "single_bin_3",
 )
 
-BIN_HIGHLIGHT_LINE_WIDTH = 4
-BIN_CENTER_RADIUS = 5
+BIN_HIGHLIGHT_LINE_WIDTH = 2
+BIN_CENTER_RADIUS = 4
 BIN_OUTPUT_SIZE = 224
+BIN_PADDING_COLOR = (184, 167, 72)
 
 TARGET_TO_BBOX = {
     "red box": "redbox",
@@ -265,12 +266,13 @@ def _extract_bin_grounding_image(
     2. Verify that they are ordered from left to right.
     3. Compute the union bounding box containing all bins.
     4. Expand the union box by BIN_GROUP_MARGIN_RATIO.
-    5. Crop the four-bin region.
-    6. Resize it to 224x224.
-    7. Draw a purple bounding box and center marker on the target bin.
+    5. Crop the rectangular four-bin region.
+    6. Resize the crop while preserving its aspect ratio.
+    7. Center it inside a 224x224 light-brown canvas.
+    8. Draw a purple bounding box and center marker on the target bin.
 
-    The result is a spatial reference image: all four bins remain visible,
-    while only the target destination is highlighted.
+    The output therefore preserves the geometry of the bins and provides
+    an explicit spatial reference for the place destination.
     """
 
     # ---------------------------------------------------------
@@ -385,58 +387,25 @@ def _extract_bin_grounding_image(
 
     image_height, image_width = front_image.shape[:2]
 
-    # Center of the complete bin group.
-    group_center_x = 0.5 * (group_x_min + group_x_max)
-    group_center_y = 0.5 * (group_y_min + group_y_max)
+    # ---------------------------------------------------------
+    # 4. Add a small margin around the complete bin group.
+    # ---------------------------------------------------------
 
-    # Use the largest dimension so that all four bins fit in a square.
-    square_size = max(group_width, group_height)
+    x_margin = group_width * BIN_GROUP_MARGIN_RATIO
+    y_margin = group_height * BIN_GROUP_MARGIN_RATIO
 
-    # Add context around the group.
-    square_size *= (1.0 + 2.0 * BIN_GROUP_MARGIN_RATIO)
-
-    # A square crop cannot be larger than the source frame.
-    square_size = min(
-        square_size,
-        image_width,
-        image_height,
+    crop_x_min = int(
+        max(0, np.floor(group_x_min - x_margin))
     )
-
-    square_size = int(np.ceil(square_size))
-
-    # Initial square centered on the four bins.
-    crop_x_min = int(round(group_center_x - square_size / 2))
-    crop_y_min = int(round(group_center_y - square_size / 2))
-
-    crop_x_max = crop_x_min + square_size
-    crop_y_max = crop_y_min + square_size
-
-    # Shift the square if it goes outside the image.
-    # We shift instead of clipping so that the crop remains square.
-
-    if crop_x_min < 0:
-        crop_x_max -= crop_x_min
-        crop_x_min = 0
-
-    if crop_x_max > image_width:
-        shift = crop_x_max - image_width
-        crop_x_min -= shift
-        crop_x_max = image_width
-
-    if crop_y_min < 0:
-        crop_y_max -= crop_y_min
-        crop_y_min = 0
-
-    if crop_y_max > image_height:
-        shift = crop_y_max - image_height
-        crop_y_min -= shift
-        crop_y_max = image_height
-
-    # Final safety clipping.
-    crop_x_min = max(0, crop_x_min)
-    crop_y_min = max(0, crop_y_min)
-    crop_x_max = min(image_width, crop_x_max)
-    crop_y_max = min(image_height, crop_y_max)
+    crop_y_min = int(
+        max(0, np.floor(group_y_min - y_margin))
+    )
+    crop_x_max = int(
+        min(image_width, np.ceil(group_x_max + x_margin))
+    )
+    crop_y_max = int(
+        min(image_height, np.ceil(group_y_max + y_margin))
+    )
 
     if crop_x_max <= crop_x_min or crop_y_max <= crop_y_min:
         raise ValueError(
@@ -445,15 +414,9 @@ def _extract_bin_grounding_image(
             f"{crop_x_max}, {crop_y_max})"
         )
 
-    # Important sanity check: aspect ratio must remain approximately 1:1.
-    crop_width = crop_x_max - crop_x_min
-    crop_height = crop_y_max - crop_y_min
-
-    if abs(crop_width - crop_height) > 1:
-        raise ValueError(
-            f"Four-bin crop is not square in episode {episode_id}: "
-            f"{crop_width}x{crop_height}"
-        )
+    # ---------------------------------------------------------
+    # 5. Extract the rectangular four-bin crop.
+    # ---------------------------------------------------------
 
     bin_crop = front_image[
         crop_y_min:crop_y_max,
@@ -465,61 +428,139 @@ def _extract_bin_grounding_image(
             f"Empty four-bin crop in episode {episode_id}."
         )
 
+    original_crop_height, original_crop_width = bin_crop.shape[:2]
+
     # ---------------------------------------------------------
-    # 5. Resize to model input resolution.
+    # 6. Resize while preserving aspect ratio.
     # ---------------------------------------------------------
 
-    resized_crop = resize(
-        bin_crop,
-        target_size=(BIN_OUTPUT_SIZE, BIN_OUTPUT_SIZE),
+    scale = min(
+        BIN_OUTPUT_SIZE / original_crop_width,
+        BIN_OUTPUT_SIZE / original_crop_height,
     )
 
-    resized_crop = np.asarray(
-        resized_crop,
+    resized_width = max(
+        1,
+        int(round(original_crop_width * scale)),
+    )
+    resized_height = max(
+        1,
+        int(round(original_crop_height * scale)),
+    )
+
+    resized_bin_crop = resize(
+        bin_crop,
+        target_size=(resized_width, resized_height),
+    )
+
+    resized_bin_crop = np.asarray(
+        resized_bin_crop,
         dtype=np.uint8,
     )
 
+    remaining_x = BIN_OUTPUT_SIZE - resized_width
+    remaining_y = BIN_OUTPUT_SIZE - resized_height
+
+    if remaining_x < 0 or remaining_y < 0:
+        raise ValueError(
+            f"Invalid resized bin crop size in episode {episode_id}: "
+            f"{resized_width}x{resized_height}"
+        )
+
     # ---------------------------------------------------------
-    # 6. Map target-bin coordinates into the resized crop.
+    # 7. Center the crop on a fixed light-brown 224x224 canvas.
     # ---------------------------------------------------------
 
-    original_crop_width = crop_x_max - crop_x_min
-    original_crop_height = crop_y_max - crop_y_min
+    pad_left = remaining_x // 2
+    pad_right = remaining_x - pad_left
 
-    scale_x = BIN_OUTPUT_SIZE / original_crop_width
-    scale_y = BIN_OUTPUT_SIZE / original_crop_height
+    # Vertical padding: put all extra space above the bins,
+    # so that the bins occupy the lower horizontal band.
+    pad_top = remaining_y
+    pad_bottom = 0
+
+    resized_crop = np.full(
+        (
+            BIN_OUTPUT_SIZE,
+            BIN_OUTPUT_SIZE,
+            3,
+        ),
+        BIN_PADDING_COLOR,
+        dtype=np.uint8,
+    )
+
+    resized_crop[
+        pad_top:pad_top + resized_height,
+        pad_left:pad_left + resized_width,
+    ] = resized_bin_crop
+
+    if resized_crop.shape != (
+        BIN_OUTPUT_SIZE,
+        BIN_OUTPUT_SIZE,
+        3,
+    ):
+        raise ValueError(
+            f"Unexpected padded crop shape in episode {episode_id}: "
+            f"{resized_crop.shape}"
+        )
+
+    # ---------------------------------------------------------
+    # 8. Map target-bin coordinates into the padded image.
+    # ---------------------------------------------------------
 
     target_box = bin_boxes[target_bin_bbox_key]
 
     target_x_min = int(round(
-        (target_box["x_min"] - crop_x_min) * scale_x
+        pad_left
+        + (target_box["x_min"] - crop_x_min) * scale
     ))
+
     target_y_min = int(round(
-        (target_box["y_min"] - crop_y_min) * scale_y
+        pad_top
+        + (target_box["y_min"] - crop_y_min) * scale
     ))
+
     target_x_max = int(round(
-        (target_box["x_max"] - crop_x_min) * scale_x
+        pad_left
+        + (target_box["x_max"] - crop_x_min) * scale
     ))
+
     target_y_max = int(round(
-        (target_box["y_max"] - crop_y_min) * scale_y
+        pad_top
+        + (target_box["y_max"] - crop_y_min) * scale
     ))
 
     target_center_x = int(round(
-        (float(target_box["center"][0]) - crop_x_min)
-        * scale_x
-    ))
-    target_center_y = int(round(
-        (float(target_box["center"][1]) - crop_y_min)
-        * scale_y
+        pad_left
+        + (
+            float(target_box["center"][0])
+            - crop_x_min
+        ) * scale
     ))
 
-    # Clip drawing coordinates to the final image.
+    target_center_y = int(round(
+        pad_top
+        + (
+            float(target_box["center"][1])
+            - crop_y_min
+        ) * scale
+    ))
+
+    # Clip all drawing coordinates to the output image.
     max_coord = BIN_OUTPUT_SIZE - 1
 
-    target_x_min = int(np.clip(target_x_min, 0, max_coord))
-    target_y_min = int(np.clip(target_y_min, 0, max_coord))
-    target_x_max = int(np.clip(target_x_max, 0, max_coord))
-    target_y_max = int(np.clip(target_y_max, 0, max_coord))
+    target_x_min = int(
+        np.clip(target_x_min, 0, max_coord)
+    )
+    target_y_min = int(
+        np.clip(target_y_min, 0, max_coord)
+    )
+    target_x_max = int(
+        np.clip(target_x_max, 0, max_coord)
+    )
+    target_y_max = int(
+        np.clip(target_y_max, 0, max_coord)
+    )
 
     target_center_x = int(
         np.clip(target_center_x, 0, max_coord)
@@ -529,7 +570,7 @@ def _extract_bin_grounding_image(
     )
 
     # ---------------------------------------------------------
-    # 7. Draw target annotation after resize.
+    # 9. Draw the target annotation after resizing/padding.
     # ---------------------------------------------------------
 
     annotated_image = Image.fromarray(
@@ -539,6 +580,7 @@ def _extract_bin_grounding_image(
 
     draw = ImageDraw.Draw(annotated_image)
 
+    # Purple target-bin bounding box.
     draw.rectangle(
         [
             (target_x_min, target_y_min),
@@ -548,6 +590,7 @@ def _extract_bin_grounding_image(
         width=BIN_HIGHLIGHT_LINE_WIDTH,
     )
 
+    # Purple target-bin center marker.
     draw.ellipse(
         [
             (
@@ -797,11 +840,11 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
                 }
             })
             # ======================= DEBUG =================================
-            print(episode[-1])
-            Image.fromarray(episode[-1]['observation']['image_0']).save("obs.jpg")
-            for i, img in enumerate(episode[-1]['interleaved_instruction']['image_instruction']):
-                Image.fromarray(img).save(f"{i}.jpg")
-            exit(0)
+            # print(episode[-1])
+            # Image.fromarray(episode[-1]['observation']['image_0']).save("obs.jpg")
+            # for i, img in enumerate(episode[-1]['interleaved_instruction']['image_instruction']):
+            #     Image.fromarray(img).save(f"{i}.jpg")
+            # exit(0)
             
         # create output data sample
         sample = {
