@@ -39,7 +39,7 @@ def make_oxe_dataset_kwargs(
 
     if dataset_kwargs["action_encoding"] is ActionEncoding.EEF_POS:
         # with EEF_POS actions, the last action dimension is gripper
-        dataset_kwargs["action_normalization_mask"] = [True] * 6 + [False]
+        dataset_kwargs["action_normalization_mask"] = [True] * 7 # + [False]
     elif dataset_kwargs["action_encoding"] is ActionEncoding.JOINT_POS:
         # with JOINT_POS actions, last dimension is gripper
         dataset_kwargs["action_normalization_mask"] = [True] * 7 + [False]
