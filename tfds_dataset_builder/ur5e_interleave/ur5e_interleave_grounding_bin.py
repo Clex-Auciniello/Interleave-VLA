@@ -898,9 +898,9 @@ class Ur5eInterleaveGroundingBin(MultiThreadedDatasetBuilder):
     # RELEASE_NOTES = {
     #   '1.0.0': 'Initial release.',
     # }
-    VERSION = tfds.core.Version('0.1.0')
+    VERSION = tfds.core.Version('0.2.0')
     RELEASE_NOTES = {
-      '0.1.0': 'Initial UR5e interleaved dataset builder.',
+      "0.2.0": "Bin-grounding dataset preserving scaled action representation.",
     }
     N_WORKERS = 4             # number of parallel workers for data conversion
     MAX_PATHS_IN_MEMORY = 4  # number of paths converted & stored in memory before writing to disk
