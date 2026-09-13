@@ -50,6 +50,9 @@ data:
     split: train
     data_path: ${oc.env:VLA_DATA_DIR}
 
+    action_proprio_normalization_type: normal
+
+
     window_size: ${cond_steps}
     action_horizon: ${horizon_steps}
     skip_unlabeled: True
@@ -127,7 +130,7 @@ max_grad_norm: 1.0
 
 flow_sampling: beta
 num_inference_steps: 10
-final_action_clip_value: 1.0  # data normalized in [-1,1]
+final_action_clip_value: null  # data normalized in [-1,1]
 
 cond_steps: 1
 horizon_steps: 4

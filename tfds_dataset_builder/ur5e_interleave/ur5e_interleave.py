@@ -82,9 +82,9 @@ def _to_scalar(value, dtype):
 
     return dtype(value.item())
 
-def _binary_gripper(value) -> np.float32:
-    """Convert gripper value to 0=open, 1=closed."""
-    return np.float32(float(value) >= 0.5)
+# def _binary_gripper(value) -> np.float32:
+#     """Convert gripper value to 0=open, 1=closed."""
+#     return np.float32(float(value) >= 0.5)
 
 
 def _get_raw_data_path() -> str:
@@ -359,19 +359,29 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
             state = np.concatenate([
                 eef_state,
                 np.asarray(
-                    [_binary_gripper(gripper_state[1])],
+                    [gripper_state[1]],
                     dtype=np.float32,
                 ),
             ]).astype(np.float32)
 
             # Recover physical delta action.
-            action = np.empty(7, dtype=np.float32)
-            action[:6] = action_raw[:6] * ACTION_SCALE_FACTOR
+            # action = np.empty(7, dtype=np.float32)
+            # action[:6] = action_raw[:6] * ACTION_SCALE_FACTOR
 
-            scaled_gripper_action = (
-                action_raw[6] * ACTION_SCALE_FACTOR
+            # scaled_gripper_action = (
+            #     action_raw[6] * ACTION_SCALE_FACTOR
+            # )
+            # action[6] = _binary_gripper(scaled_gripper_action)
+
+            # Keep the action representation exactly as stored
+            # in the source dataset.
+            #
+            # Pose deltas remain scaled by 1 / ACTION_SCALE_FACTOR,
+            # and the gripper command is not binarized.
+            action = action_raw.astype(
+                np.float32,
+                copy=True,
             )
-            action[6] = _binary_gripper(scaled_gripper_action)
 
             camera_image = resize(
                 _to_uint8_image(
@@ -481,9 +491,9 @@ class Ur5eInterleave(MultiThreadedDatasetBuilder):
     # RELEASE_NOTES = {
     #   '1.0.0': 'Initial release.',
     # }
-    VERSION = tfds.core.Version('0.1.0')
+    VERSION = tfds.core.Version('0.2.0')
     RELEASE_NOTES = {
-      '0.1.0': 'Initial UR5e interleaved dataset builder.',
+      '0.2.0': 'Initial UR5e interleaved dataset builder with scaled data.',
     }
     N_WORKERS = 4             # number of parallel workers for data conversion
     MAX_PATHS_IN_MEMORY = 4  # number of paths converted & stored in memory before writing to disk
