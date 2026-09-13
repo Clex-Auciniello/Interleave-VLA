@@ -111,9 +111,9 @@ def _to_scalar(value, dtype):
 
     return dtype(value.item())
 
-def _binary_gripper(value) -> np.float32:
-    """Convert gripper value to 0=open, 1=closed."""
-    return np.float32(float(value) >= 0.5)
+# def _binary_gripper(value) -> np.float32:
+#     """Convert gripper value to 0=open, 1=closed."""
+#     return np.float32(float(value) >= 0.5)
 
 
 def _get_raw_data_path() -> str:
@@ -777,19 +777,32 @@ def _generate_examples(paths) -> Iterator[Tuple[str, Any]]:
             state = np.concatenate([
                 eef_state,
                 np.asarray(
-                    [_binary_gripper(gripper_state[1])],
+                    #[_binary_gripper(gripper_state[1])],
+                    [gripper_state[1]],
                     dtype=np.float32,
                 ),
             ]).astype(np.float32)
 
             # Recover physical delta action.
-            action = np.empty(7, dtype=np.float32)
-            action[:6] = action_raw[:6] * ACTION_SCALE_FACTOR
+            # action = np.empty(7, dtype=np.float32)
+            # action[:6] = action_raw[:6] * ACTION_SCALE_FACTOR
 
-            scaled_gripper_action = (
-                action_raw[6] * ACTION_SCALE_FACTOR
+            # scaled_gripper_action = (
+            #     action_raw[6] * ACTION_SCALE_FACTOR
+            # )
+            # action[6] = _binary_gripper(scaled_gripper_action)
+
+
+
+            # Keep the action representation exactly as stored
+            # in the source dataset.
+            #
+            # Pose deltas remain scaled by 1 / ACTION_SCALE_FACTOR,
+            # and the gripper command is not binarized.
+            action = action_raw.astype(
+                np.float32,
+                copy=True,
             )
-            action[6] = _binary_gripper(scaled_gripper_action)
 
             camera_image = resize(
                 _to_uint8_image(
